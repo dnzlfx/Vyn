@@ -82,11 +82,35 @@ exit            Termina la sesión
 ```
 vyn.py            # punto de entrada / loop del agente
 ├── core/         # llm_manager, memory, sandbox, search_engine, system_installer
-├── modules/      # homelab (SSH), docker_helper, rag, vision, security
+├── modules/      # homelab (SSH), command_policy, docker_helper, rag, vision, security
 ├── ui/           # dashboard y prompts (rich)
 ├── i18n.py       # internacionalización
 └── setup_wizard.py
 ```
+
+## Clasificación de comandos (seguridad)
+
+`modules/command_policy.py` es la **fuente única de verdad** para decidir qué
+comandos de shell pueden ejecutarse sin confirmación. Es *fail-closed*: solo un
+comando **simple y de solo lectura** se clasifica como `LOW` (auto-ejecutable).
+Cualquier composición o expansión de shell (`;`, `|`, `&&`, `$(...)`, backticks,
+redirecciones, saltos de línea) degrada la clasificación y **exige confirmación
+explícita**, igual que los envoltorios (`sudo`, `xargs`, `env`, ...) y los
+subcomandos peligrosos de binarios "seguros" (`docker rm`, `systemctl restart`).
+
+Ejemplo:
+
+```python
+from modules.command_policy import CommandPolicy
+
+CommandPolicy.is_command_safe("df -h")          # True  -> sin confirmación
+CommandPolicy.is_command_safe("ls; rm -rf /")   # False -> requiere confirmación
+CommandPolicy.classify("docker rm -f app")      # ("MEDIUM", "...")
+```
+
+Tanto `modules/homelab.HomeLab._is_safe_command` como
+`modules/security_layer.SecurityLayer.classify_risk` delegan en esta política,
+de modo que no pueden divergir.
 
 ## Desarrollo
 
@@ -95,6 +119,15 @@ make dev      # instala deps + herramientas de dev
 make lint     # ruff
 make test     # pytest (smoke: compila todo y valida config)
 make compile  # chequeo de sintaxis
+```
+
+Para probar **solo** la política de comandos (no requiere dependencias pesadas):
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt
+pytest -q tests/test_command_policy.py
+# esperado: 154 passed
 ```
 
 Ver [CONTRIBUTING.md](CONTRIBUTING.md).

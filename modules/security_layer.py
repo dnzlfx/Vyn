@@ -15,6 +15,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Tuple, List
 
+from .command_policy import CommandPolicy
+
 logger = logging.getLogger(__name__)
 
 
@@ -122,19 +124,20 @@ class SecurityLayer:
             Tuple of (risk_level, reason)
         """
         command = command.strip()
-        
-        # Check if it's a safe command
-        for pattern in self.SAFE_PATTERNS:
-            if re.match(pattern, command, re.IGNORECASE):
-                return (self.RISK_LOW, None)
-        
-        # Check against dangerous patterns
-        for pattern, (risk, reason) in self.DANGEROUS_PATTERNS.items():
-            if re.search(pattern, command, re.IGNORECASE):
-                return (risk, reason)
-        
-        # Default to MEDIUM for unknown commands
-        return (self.RISK_MEDIUM, None)
+
+        # La determinacion de "seguro" delega en modules.command_policy
+        # (fail-closed, consciente de composicion de shell). Antes bastaba un
+        # re.match contra SAFE_PATTERNS, asi que 'ls; rm -rf /' se clasificaba
+        # como LOW y se saltaba la confirmacion.
+        policy_risk, policy_reason = CommandPolicy.classify(command)
+        if policy_risk != CommandPolicy.RISK_LOW:
+            # Los patrones peligrosos afinan severidad y motivo.
+            for pattern, (risk, reason) in self.DANGEROUS_PATTERNS.items():
+                if re.search(pattern, command, re.IGNORECASE):
+                    return (risk, reason)
+            return (policy_risk, policy_reason)
+
+        return (self.RISK_LOW, None)
     
     def is_safe_command(self, command: str) -> bool:
         """Check if a command is safe to execute without confirmation."""
